@@ -27,8 +27,8 @@ class SitesToAzureBlob:
         else:
             os.environ['EMULATED'] = 'false'
  
-        #self.storage_account = _StorageClient(account_name, account_key)
-        #self.blob_service = BlobService(self.storage_account)
+#        self.storage_account = _StorageClient(account_name, account_key)
+#        self.blob_service = BlobService(self.storage_account)
         self.blob_service = CloudStorageAccount(self.account_name, self.account_key).create_blob_service()
         if over_write:
             self.blob_service.delete_container(container_name)
@@ -38,8 +38,8 @@ class SitesToAzureBlob:
     def upload_files_to_blob(self):
         for root, dirs, files in os.walk(self.input_folder):
             for fi in files:
-                full_path = os.path.join(root, fi).lower()
-                blob_path=self.list_filename_in_blob(full_path)
+                full_path = os.path.abspath(os.path.join(root, fi)).lower()
+                blob_path = self.list_filename_in_blob(full_path)
                 root, ext = os.path.splitext(blob_path)
                 if ext == '.htm' or ext == '.html':
                     blob_path = root
@@ -47,15 +47,16 @@ class SitesToAzureBlob:
                 content_type = self.fetch_content_type(ext)
                 self.blob_service.put_blob(self.container_name, blob_path, file_blob, x_ms_blob_type = 'BlockBlob', 
                                            x_ms_blob_content_type = content_type)
-                print blob_path + 'uploaded'
+                print blob_path + ' uploaded'
                 
-    def list_filename_in_blob(self, fullPath):
+    def list_filename_in_blob(self, full_path):
         '''
         Function to get the file path names in the input_folder for blob storage.
         If we uploaded from a subfolder (such as /search), we must rename blobs to have the 'folder/' prefix in their name. 
         For example, if we uploaded index.html from search subfolder, rename the blob from 'index.html' to 'search/index.html'.
         '''
-        name = fullPath.replace(self.input_folder, '')
+        name = full_path
+        name = name.replace(self.input_folder, '')
         if re.match('[A-Za-z0-9_-]', name[0]) is None:
             name=name[1:] 
         return name
