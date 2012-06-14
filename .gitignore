@@ -2,3 +2,6 @@
 *.pyproj
 *.sln
 *.suo
+.pydevproject
+
+.project
