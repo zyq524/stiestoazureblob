@@ -1,7 +1,7 @@
 from azure.storage.cloudstorageaccount import CloudStorageAccount
 from azure.storage.blobservice import BlobService
 from bs4 import BeautifulSoup as soup
-import os, re
+import os, re, filecmp, shutil
 
 DEVSTORE_CONTAINER_NAME = 'sitestoazure'
 
@@ -12,23 +12,29 @@ class SitesToAzureBlob:
     """
     def __init__(self, 
                  input_folder, 
+                 output_folder = 'output',
+                 overwrite_output = False,
                  remove_html_ext = True,
-                 over_write = True,
+                 overwrite_container = True,
                  account_name = None, 
                  account_key = None, 
                  container_name = DEVSTORE_CONTAINER_NAME):
         '''
         Constructor function. Creates a new container for blobs under the specified account. 
-        If the container with the same name already exists, delete it if over_write is true.
+        If the container with the same name already exists, delete it if overwrite_container is true.
 
         input_folder: The folder contains all the resources of the static website.
-        remove_html_ext: Remove the .htm/.html in the url.
-        over_write: Delete the existing container.
+        output_folder: The folder contains all the resources uploaded.
+        overwrite_output: Overwrites the output_folder anyway. 
+        remove_html_ext: Removes the .htm/.html in the url.
+        overwrite_container: Deletes the existing container.
         account_name: Optional. Your storage account name, DEVSTORE_ACCOUNT_NAME is used if None.
         account_key: Optional. Your storage account key, DEVSTORE_ACCOUNT_KEY is used if None.
         container_name: Optional. Container name, DEVSTORE_CONTAINER_NAME is used if None.
         '''
         self.input_folder = os.path.abspath(input_folder).lower()
+        self.output_folder = os.path.abspath(output_folder).lower()
+        self.overwrite_output = overwrite_output
         self.remove_html_ext = remove_html_ext
         self.account_name = account_name
         self.account_key = account_key
@@ -40,11 +46,11 @@ class SitesToAzureBlob:
             os.environ['EMULATED'] = 'false'
  
         self.blob_service = CloudStorageAccount(self.account_name, self.account_key).create_blob_service()
-        if over_write:
+        if overwrite_container:
             self.blob_service.delete_container(container_name)
             
         self.blob_service.create_container(container_name, x_ms_blob_public_access = 'container')
-        
+       
     def upload_files_to_blob(self, full_path_blob_name_dict):
         '''
         Uploads the files to the blob.
@@ -53,6 +59,7 @@ class SitesToAzureBlob:
         '''
 
         self.html_blob_name_list = []
+
         if self.remove_html_ext:
             for blob_name in full_path_blob_name_dict.values():
                 file_name, ext = os.path.splitext(blob_name)
@@ -60,6 +67,11 @@ class SitesToAzureBlob:
                     self.html_blob_name_list.append(blob_name)
 
         for full_path, blob_name in full_path_blob_name_dict.iteritems():
+            if self.overwrite_output is False and os.path.exists(os.path.join(self.output_folder, os.path.split(full_path)[1])):
+                if filecmp.cmp(full_path, os.path.join(self.output_folder, os.path.split(full_path)[1])):
+                    print blob_name + 'skips...'
+                    continue
+
             print blob_name + ' is uploading...'
 
             file_name, ext = os.path.splitext(blob_name)
@@ -72,7 +84,8 @@ class SitesToAzureBlob:
                 file_blob = self.remove_html_extension(file_blob)
 
             self.blob_service.put_blob(self.container_name, blob_name, file_blob, x_ms_blob_type = 'BlockBlob', x_ms_blob_content_type = content_type)
-                
+            shutil.copy(full_path, self.output_folder)
+
     def list_full_path_with_blob_name(self):
         '''
         Fetches the full_path as key and blob_name as value into a dictionary.
@@ -151,7 +164,7 @@ class SitesToAzureBlob:
 
 
 def main():
-    stb = SitesToAzureBlob('../yuqingzhang.com/src/main')
+    stb = SitesToAzureBlob('../yuqingzhang.com/src/main', '../yuqingzhang.com/output')
     names_dict = stb.list_full_path_with_blob_name()
     stb.upload_files_to_blob(names_dict)
     
