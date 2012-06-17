@@ -15,7 +15,7 @@ class SitesToAzureBlob:
                  output_folder = 'output',
                  overwrite_output = False,
                  remove_html_ext = True,
-                 overwrite_container = True,
+                 overwrite_container = False,
                  account_name = None, 
                  account_key = None, 
                  container_name = DEVSTORE_CONTAINER_NAME):
