@@ -39,7 +39,9 @@ class SitesToAzureBlob:
         self.account_name = account_name
         self.account_key = account_key
         self.container_name = container_name
- 
+
+        self.full_path_blob_name_dict = self.list_full_path_with_blob_name()
+
         if not account_name or not account_key:
             os.environ['EMULATED'] = 'true'
         else:
@@ -51,25 +53,28 @@ class SitesToAzureBlob:
             
         self.blob_service.create_container(container_name, x_ms_blob_public_access = 'container')
        
-    def upload_files_to_blob(self, full_path_blob_name_dict):
+    def upload_files_to_blob(self):
         '''
         Uploads the files to the blob.
 
         full_path_blob_name_dict: A dictionary whose key is the full_path of the file and the value is the blob_name.
         '''
 
-        self.html_blob_name_list = []
+        #if self.remove_html_ext:
+        #    for blob_name in full_path_blob_name_dict.values():
+        #        file_name, ext = os.path.splitext(blob_name)
+        #        if ext == '.html' or ext == '.htm':
+        #            self.html_blob_name_list.append(blob_name)
+        
+        curdir = os.getcwd()
 
-        if self.remove_html_ext:
-            for blob_name in full_path_blob_name_dict.values():
-                file_name, ext = os.path.splitext(blob_name)
-                if ext == '.html' or ext == '.htm':
-                    self.html_blob_name_list.append(blob_name)
-
-        for full_path, blob_name in full_path_blob_name_dict.iteritems():
-            if self.overwrite_output is False and os.path.exists(os.path.join(self.output_folder, os.path.split(full_path)[1])):
-                if filecmp.cmp(full_path, os.path.join(self.output_folder, os.path.split(full_path)[1])):
-                    print blob_name + 'skips...'
+        for full_path, blob_name in self.full_path_blob_name_dict.iteritems():
+            output_path = os.path.join(self.output_folder, blob_name)
+            if not os.path.exists(os.path.dirname(output_path)): 
+                os.makedirs(os.path.dirname(output_path))
+            if self.overwrite_output is False and os.path.exists(output_path):
+                if filecmp.cmp(full_path, output_path):
+                    print blob_name + ' skips...'
                     continue
 
             print blob_name + ' is uploading...'
@@ -79,12 +84,16 @@ class SitesToAzureBlob:
             file_blob = open(full_path, 'rb').read()
             content_type = self.fetch_content_type(ext)
 
-            if self.remove_html_ext and ext == '.htm' or ext == '.html':
-                blob_name = file_name
-                file_blob = self.remove_html_extension(file_blob)
+            if ext == '.htm' or ext == '.html':
+                if self.remove_html_ext:
+                    blob_name = file_name
+                os.chdir(os.path.split(full_path)[0])
+                file_blob = self.adjust_url_links(file_blob)
 
             self.blob_service.put_blob(self.container_name, blob_name, file_blob, x_ms_blob_type = 'BlockBlob', x_ms_blob_content_type = content_type)
-            shutil.copy(full_path, self.output_folder)
+            shutil.copy(full_path, os.path.dirname(output_path))
+
+        os.chdir(curdir)
 
     def list_full_path_with_blob_name(self):
         '''
@@ -100,21 +109,27 @@ class SitesToAzureBlob:
 
     def url_rep(self, matchobj):
         '''
-        This is called for every non-overlapping occurrence of pattern: href=[\'"]?([^\'" >]+).
-        If the matching link url is in html_blob_name_list, remove its extension name, e.g. '.html'.
+        This is called for every non-overlapping occurrence of pattern: href|src=[\'"]?([^\'" >]+).
         '''
-        if matchobj.group(1) in self.html_blob_name_list:
-            return r'href="' + os.path.splitext(matchobj.group(1))[0] + '"'
+        url_blob_name = self.list_blob_name(os.path.abspath(matchobj.group(2))).replace('\\', '/')
+        if url_blob_name in self.full_path_blob_name_dict.values():
+            file_name, ext = os.path.splitext(matchobj.group(2))
+            if self.remove_html_ext and ext == '.html' or ext == '.htm': 
+                return matchobj.group(1) + r'="' + file_name + '"'
+            else:
+                return matchobj.group(0)
         else:
             return matchobj.group(0)
 
-    def remove_html_extension(self, file_content):
+
+    def adjust_url_links(self, file_content):
         '''
-        Removes the .html/.htm extension of the linked html files in the file_content.
+        Adjusts the urls in href and src attributes.
+        Removes the .html/.htm extension of the linked html files in the file_content if needed.
 
         file_content: the content of the html file
         '''
-        file_content = re.sub(r'href=[\'"]?([^\'" >]+)', self.url_rep, file_content)
+        file_content = re.sub(r'(href|src)=[\'"]?([^\'" >]+)', self.url_rep, file_content)
 
         '''
         Problem with using BeautifulSoup. It cannot preserve the '<', '>' in the <script type="text/template"...>
@@ -125,12 +140,13 @@ class SitesToAzureBlob:
         #    if href in html_blob_name_list:
         #        tag['href'] = os.path.splitext(href)[0]
         #return str(html)
+
         return file_content
 
 
     def list_blob_name(self, full_path):
         '''
-        Gets the file path names in the input_folder for blob storage.
+        Gets the file path name in the input_folder for blob storage.
         If we uploaded from a subfolder (such as /search), we must rename blobs to have the 'folder/' prefix in their name. 
         For example, if we uploaded index.html from search subfolder, rename the blob from 'index.html' to 'search/index.html'.
         '''
